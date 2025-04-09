@@ -34,7 +34,7 @@ public class AuthController : ControllerBase
         // ✅ إضافة الدور إلى التوكن
         var token = _jwtTokenService.GenerateJwtToken(user);
 
-        return Ok(new { token, role = user.Role, username = user.Username });
+        return Ok(new { token, role = user.Role, username = user.Username, userId = user.Id });
     }
 
     // ✅ تسجيل مستخدم جديد
