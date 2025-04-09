@@ -38,6 +38,78 @@ namespace TestMasterPeace.Controllers
             });
         }
 
+        // GET Seller Products
+        [HttpGet("products")]
+        public async Task<IActionResult> GetSellerProducts()
+        {
+            var sellerUsername = User.Identity?.Name; // Use null-conditional operator
+            if (string.IsNullOrEmpty(sellerUsername))
+            {
+                return Unauthorized(new { message = "Cannot identify seller from token." });
+            }
+
+            // Query products where the Seller's Username matches
+            // This assumes you have navigation property setup: Product -> Seller -> Username
+            // Adjust the query based on your actual DbContext and relationships
+            var products = await _dbContext.Products
+                                       .Where(p => p.Seller != null && p.Seller.Username == sellerUsername)
+                                       .ToListAsync();
+
+            // If you only have SellerId on the Product model:
+            /*
+            var seller = await _dbContext.Users.FirstOrDefaultAsync(u => u.Username == sellerUsername);
+            if (seller == null) return Unauthorized(new { message = "Seller not found." });
+            var products = await _dbContext.Products
+                                       .Where(p => p.SellerId == seller.Id)
+                                       .ToListAsync();
+            */
+
+            return Ok(products);
+        }
+
+        // GET Single Seller Product by ID
+        [HttpGet("products/{id}")]
+        public async Task<IActionResult> GetProductById(int id)
+        {
+            var sellerUsername = User.Identity?.Name;
+            if (string.IsNullOrEmpty(sellerUsername))
+            {
+                return Unauthorized(new { message = "Cannot identify seller from token." });
+            }
+
+            // Find the product by ID
+            // Include Category or other related data if needed by the form
+            var product = await _dbContext.Products
+                                       // .Include(p => p.Category) // Example include
+                                       .FirstOrDefaultAsync(p => p.Id == id);
+
+            if (product == null)
+            {
+                return NotFound(new { message = "Product not found." });
+            }
+
+            // Verify the product belongs to the current seller
+            // This requires either product.SellerId or product.Seller.Username
+            // Assuming product.Seller.Username exists (adjust if using SellerId)
+            var productSeller = await _dbContext.Users.FindAsync(product.SellerId);
+            if (productSeller?.Username != sellerUsername)
+            {
+                 // Or check product.Seller.Username if navigation property exists and loaded
+                 // if (product.Seller?.Username != sellerUsername) { ... }
+                 return Unauthorized(new { message = "You are not authorized to view this product." });
+            }
+            /* Alternative check using SellerId directly if navigation property not used:
+               var seller = await _dbContext.Users.FirstOrDefaultAsync(u => u.Username == sellerUsername);
+               if (seller == null || product.SellerId != seller.Id)
+               {
+                    return Unauthorized(new { message = "You are not authorized to view this product." });
+               }
+            */
+
+            // Return the product data
+            return Ok(product);
+        }
+
         [HttpPost("products")]
         public async Task<IActionResult> AddProduct(CreateProductRequest newProduct)
         {
