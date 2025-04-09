@@ -223,21 +223,14 @@ namespace TestMasterPeace.Controllers
                     return NotFound(new { message = "Order not found or does not belong to the user." });
                 }
 
-                // Define cancelable statuses (e.g., only Pending)
-                var cancelableStatuses = new[] { "pending" }; // Case-insensitive comparison below
-
-                if (!cancelableStatuses.Contains(order.Status.ToLower()))
+                if (order.Status.ToLower() != "pending" && order.Status.ToLower() != "processing")
                 {
-                    return BadRequest(new { message = $"Order cannot be cancelled in its current status ('{order.Status}')." });
+                    return BadRequest(new { message = "لا يمكن إلغاء الطلب في حالته الحالية." });
                 }
 
-                // Update status to Cancelled
                 order.Status = "Cancelled";
-                // Optionally: Add logic to return stock if needed
-
                 await _context.SaveChangesAsync();
-
-                return Ok(new { message = "Order cancelled successfully.", orderId = order.Id, newStatus = order.Status });
+                return Ok(new { message = "تم إلغاء الطلب بنجاح." });
             }
             catch (Exception ex)
             {
@@ -245,6 +238,33 @@ namespace TestMasterPeace.Controllers
                 Console.WriteLine($"Error cancelling order {orderId} for user {userId}: {ex}");
                 return StatusCode(StatusCodes.Status500InternalServerError, "An error occurred while cancelling the order.");
             }
+        }
+        
+        // --- New Endpoint for Buyer --- 
+        // PUT: /Order/{orderId}/mark-delivered
+        [HttpPut("{orderId}/mark-delivered")]
+        public async Task<IActionResult> MarkOrderAsDelivered(long orderId)
+        {
+            long userId;
+            try { userId = GetUserId(); } catch (UnauthorizedAccessException ex) { return Unauthorized(new { message = ex.Message }); }
+
+            var order = await _context.Orders.FirstOrDefaultAsync(o => o.Id == orderId && o.UserId == userId);
+
+            if (order == null)
+            {
+                return NotFound(new { message = "لم يتم العثور على الطلب." });
+            }
+
+            // Allow marking as delivered only if the order is 'Shipped'
+            if (order.Status?.ToLower() != "shipped")
+            {
+                return BadRequest(new { message = "لا يمكن تأكيد استلام طلب لم يتم شحنه بعد." });
+            }
+
+            order.Status = "Delivered";
+            await _context.SaveChangesAsync();
+
+            return Ok(new { message = "تم تأكيد استلام الطلب بنجاح!" });
         }
     }
 }
