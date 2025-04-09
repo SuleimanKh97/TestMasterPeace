@@ -4,13 +4,17 @@ using Microsoft.EntityFrameworkCore;
 using TestMasterPeace.DTOs.ProductsDTOs;
 using TestMasterPeace.Models;
 using TestMasterPeace.Services;
+using Microsoft.AspNetCore.Authorization;
+using System.Linq;
+using System.Security.Claims;
+using System.Threading.Tasks;
+using TestMasterPeace.Controllers.TestMasterPeace.DTOs.SellerDTOs;
 
 namespace TestMasterPeace.Controllers
 {
-
-
     [Route("[controller]")]
     [ApiController]
+    [Authorize(Roles = "Seller")]
     public class SellerController : ControllerBase
     {
         private readonly MasterPeiceContext _dbContext;
@@ -18,6 +22,16 @@ namespace TestMasterPeace.Controllers
         public SellerController(MasterPeiceContext dbContext)
         {
             _dbContext = dbContext;
+        }
+
+        private long GetCurrentSellerId()
+        {
+            var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
+            if (long.TryParse(userIdClaim, out long userId))
+            {
+                return userId;
+            }
+            throw new UnauthorizedAccessException("Seller ID not found or invalid in token.");
         }
 
         [HttpGet("dashboard")]
@@ -178,6 +192,146 @@ namespace TestMasterPeace.Controllers
             return Ok(orders);
         }
 
-       
+        [HttpGet("MyOrderItems")]
+        public async Task<IActionResult> GetMyOrderItems()
+        {
+            long sellerId;
+            try
+            {
+                sellerId = GetCurrentSellerId();
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return Unauthorized(new { message = ex.Message });
+            }
+
+            try
+            {
+                var sellerOrderItems = await _dbContext.OrderItems
+                    .Include(oi => oi.Product)
+                    .Include(oi => oi.Order)
+                    .Where(oi => oi.Product != null && oi.Product.SellerId == sellerId &&
+                                oi.Order != null && oi.Order.Status.ToLower() != "cancelled")
+                    .OrderByDescending(oi => oi.Order.CreatedAt)
+                    .Select(oi => new SellerOrderItemDTO
+                    {
+                        OrderItemId = oi.Id,
+                        OrderId = (long)oi.OrderId,
+                        OrderDate = oi.Order.CreatedAt,
+                        OrderStatus = oi.Order.Status,
+                        ProductId = (long)oi.ProductId,
+                        ProductName = oi.Product.Name,
+                        Quantity = oi.Quantity,
+                        PricePerItem = oi.Price,
+                        ImageUrl = oi.Product.Img,
+                    })
+                    .ToListAsync();
+
+                return Ok(sellerOrderItems);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error fetching order items for seller {sellerId}: {ex}");
+                return StatusCode(StatusCodes.Status500InternalServerError, "An error occurred while fetching your order items.");
+            }
+        }
+
+        // PUT: /Seller/orders/{orderId}/status
+        [HttpPut("orders/{orderId}/status")]
+        public async Task<IActionResult> UpdateOrderStatus(long orderId, [FromBody] UpdateOrderStatusRequestDTO request)
+        {
+            long sellerId;
+            try { sellerId = GetCurrentSellerId(); } 
+            catch (UnauthorizedAccessException ex) { return Unauthorized(new { message = ex.Message }); }
+
+            if (request == null || string.IsNullOrEmpty(request.NewStatus))
+            {
+                return BadRequest(new { message = "New status is required." });
+            }
+
+            var validNewStatuses = new[] { "shipped", "cancelled" }; // Allowed new statuses by seller
+            var newStatusLower = request.NewStatus.ToLower();
+
+            if (!validNewStatuses.Contains(newStatusLower))
+            {
+                return BadRequest(new { message = "Invalid target status." });
+            }
+
+            try
+            {
+                // Find the order
+                var order = await _dbContext.Orders
+                    .Include(o => o.OrderItems) // Include items to check ownership
+                        .ThenInclude(oi => oi.Product) 
+                    .FirstOrDefaultAsync(o => o.Id == orderId);
+
+                if (order == null)
+                {
+                    return NotFound(new { message = "Order not found." });
+                }
+
+                // Verify that at least one item in the order belongs to this seller
+                bool sellerInvolved = order.OrderItems.Any(oi => oi.Product != null && oi.Product.SellerId == sellerId);
+                if (!sellerInvolved)
+                {
+                     return Forbid(); // Or BadRequest("You are not involved in this order.");
+                }
+
+                // Check if the status transition is allowed
+                var currentStatusLower = order.Status.ToLower();
+                bool transitionAllowed = false;
+                if (newStatusLower == "shipped" && currentStatusLower == "processing")
+                {
+                    transitionAllowed = true;
+                }
+                else if (newStatusLower == "cancelled" && currentStatusLower == "pending")
+                {
+                    transitionAllowed = true;
+                }
+                // Add more allowed transitions if needed
+
+                if (!transitionAllowed)
+                {
+                     return BadRequest(new { message = $"Cannot change order status from '{order.Status}' to '{request.NewStatus}'." });
+                }
+
+                // Update the order status
+                order.Status = request.NewStatus; // Use the provided casing or normalize it (e.g., ToUpperCamelCase)
+
+                // Optionally: Add logic for stock adjustment on cancellation, notifications, etc.
+
+                await _dbContext.SaveChangesAsync();
+
+                return Ok(new { message = "Order status updated successfully.", orderId = order.Id, newStatus = order.Status });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error updating status for order {orderId} by seller {sellerId}: {ex}");
+                return StatusCode(StatusCodes.Status500InternalServerError, "An error occurred while updating the order status.");
+            }
+        }
+    }
+
+    namespace TestMasterPeace.DTOs.SellerDTOs
+    {
+        public class SellerOrderItemDTO
+        {
+            public long OrderItemId { get; set; }
+            public long OrderId { get; set; }
+            public DateTime? OrderDate { get; set; }
+            public string OrderStatus { get; set; }
+            public long ProductId { get; set; }
+            public string ProductName { get; set; }
+            public int Quantity { get; set; }
+            public decimal PricePerItem { get; set; }
+            public string? ImageUrl { get; set; }
+        }
+
+        // --- DTO for Update Order Status Request ---
+        public class UpdateOrderStatusRequestDTO
+        {
+            [System.ComponentModel.DataAnnotations.Required]
+            public string NewStatus { get; set; }
+        }
     }
 }

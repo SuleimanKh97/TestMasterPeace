@@ -2,9 +2,14 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using TestMasterPeace.DTOs.ProductsDTOs;
+// using TestMasterPeace.DTOs.CartDTOs; // Removed potentially unused using
 using TestMasterPeace.Models;
+using System.Linq;
+using Microsoft.AspNetCore.Authorization; 
+using System.Security.Claims; 
+// using TestMasterPeace.DTOs.ProductDetail; // DTO is defined below, no need for using here
 
-namespace TestMasterPeace.Controllers;
+namespace TestMasterPeace.Controllers; // Assuming file-scoped namespace
 
 [Route("[controller]")]
 [ApiController]
@@ -13,7 +18,19 @@ public class ProductController(MasterPeiceContext context) : ControllerBase
     [HttpGet("listProduct")]
     public async Task<IActionResult> GetProducts()
     {
-        return Ok(await context.Products.ToListAsync());
+        var products = await context.Products
+            .Include(p => p.Seller)
+            .Select(p => new ShopProductDTO
+            {
+                Id = (int)p.Id,
+                Name = p.Name,
+                Description = p.Description,
+                Price = p.Price,
+                Img = p.Img,
+                SellerName = p.Seller != null ? p.Seller.Username : "Unknown Seller" // Corrected to Username
+            })
+            .ToListAsync();
+        return Ok(products);
     }
     [HttpPost("NewProduct")]
     public async Task<IActionResult> PostProduct(CreateProductRequest newProduct)
@@ -39,13 +56,25 @@ public class ProductController(MasterPeiceContext context) : ControllerBase
     {
         var product = await context.Products
             .Include(p => p.Category)
-            .FirstOrDefaultAsync(p => p.Id == id);
+            .Include(p => p.Seller)
+            .Where(p => p.Id == id)
+            .Select(p => new ProductDetailDTO // Use DTO defined below
+            {
+                Id = (int)p.Id,
+                Name = p.Name,
+                Description = p.Description,
+                Price = p.Price,
+                Img = p.Img,
+                CategoryName = p.Category != null ? p.Category.Name : "Uncategorized",
+                SellerName = p.Seller != null ? p.Seller.Username : "Unknown Seller", // Corrected to Username
+                CreatedAt = p.CreatedAt
+            })
+            .FirstOrDefaultAsync();
 
         if (product == null)
         {
-            return NotFound();
+            return NotFound(new { message = "Product not found" });
         }
-
         return Ok(product);
     }
 
@@ -60,8 +89,9 @@ public class ProductController(MasterPeiceContext context) : ControllerBase
         product.Price = updateProduct.Price;
         product.CategoryId = updateProduct.CategoryId;
         product.CreatedAt = DateTime.Now;
-
-        await context.Products.AddAsync(product);
+        // Consider using Update method instead of AddAsync for existing entities
+        context.Products.Update(product);
+        await context.SaveChangesAsync();
         return Ok();
     }
 
@@ -82,8 +112,32 @@ public class ProductController(MasterPeiceContext context) : ControllerBase
 
         return Ok(new { message = "Product deleted successfully" });
     }
-
-
-
-   
 }
+
+// --- DTO Definitions placed directly in the file (no separate namespace block) ---
+
+// DTO for Shop page product list (Ensure this matches the usage in GetProducts)
+public class ShopProductDTO
+{
+    public int Id { get; set; }
+    public string Name { get; set; }
+    public string Description { get; set; }
+    public decimal Price { get; set; }
+    public string Img { get; set; }
+    public string SellerName { get; set; }
+}
+
+// DTO for Product Detail Page
+public class ProductDetailDTO
+{
+    public int Id { get; set; }
+    public string Name { get; set; }
+    public string Description { get; set; }
+    public decimal Price { get; set; }
+    public string Img { get; set; }
+    public string CategoryName { get; set; }
+    public string SellerName { get; set; }
+    public DateTime? CreatedAt { get; set; }
+}
+
+// Removed the empty CartDTOs namespace block
