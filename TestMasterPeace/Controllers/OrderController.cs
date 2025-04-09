@@ -7,6 +7,7 @@ using System.Security.Claims;
 using System.Threading.Tasks;
 using TestMasterPeace.Models;
 using TestMasterPeace.DTOs.OrderDTOs; // Define DTOs below
+using TestMasterPeace.DTOs.CheckoutDTOs; // Add namespace for new DTO
 
 namespace TestMasterPeace.Controllers
 {
@@ -85,94 +86,115 @@ namespace TestMasterPeace.Controllers
             }
         }
         
-        // POST: /Order - Handles the checkout process, creating one order per seller
+        // POST: /Order - Handles initial order creation and COD
         [HttpPost]
-        public async Task<IActionResult> CreateOrder(/* [FromBody] CreateOrderRequestDTO requestData */)
+        public async Task<IActionResult> CreateOrder([FromBody] CreateOrderRequestDTO requestData)
         {
             long userId;
             try { userId = GetUserId(); } catch (UnauthorizedAccessException ex) { return Unauthorized(new { message = ex.Message }); }
 
-            // 1. Get user's cart items including Product (for SellerId)
+            if (requestData == null || string.IsNullOrEmpty(requestData.PaymentMethod))
+            {
+                return BadRequest(new { message = "Payment method is required." });
+            }
+
             var cartItems = await _context.Carts
                 .Where(c => c.UserId == userId)
-                .Include(c => c.Product) 
+                .Include(c => c.Product)
                 .ToListAsync();
 
             if (!cartItems.Any()) { return BadRequest(new { message = "Cart is empty." }); }
 
-            // 2. Group cart items by SellerId (assuming Product.SellerId exists and is NOT NULL)
-             var itemsBySeller = cartItems
-                .Where(item => item.Product?.SellerId != null) // Ensure product and seller ID exist
-                .GroupBy(item => item.Product.SellerId.Value); // Group by SellerId
+            var itemsBySeller = cartItems
+                .Where(item => item.Product?.SellerId != null)
+                .GroupBy(item => item.Product.SellerId.Value);
 
-            // Check if any items were excluded due to missing product/sellerId
-            if (itemsBySeller.Count() != cartItems.Count)
-            {
-                 Console.WriteLine($"Warning: Some cart items for user {userId} were ignored due to missing product or SellerId.");
-                 // Decide if this is an error or just proceed with valid items
-                 if (!itemsBySeller.Any())
-                 {
-                     return BadRequest(new { message = "No valid items found in cart to create orders." });
-                 }
-            }
+            if (!itemsBySeller.Any()) { return BadRequest(new { message = "No valid items with sellers found in cart." }); }
 
-            var createdOrderIds = new List<long>();
+            var createdOrdersInfo = new List<object>();
+            bool requiresPaymentSimulation = !requestData.PaymentMethod.Equals("CashOnDelivery", StringComparison.OrdinalIgnoreCase);
             using var transaction = await _context.Database.BeginTransactionAsync();
 
             try
             {
-                // 3. Iterate through each seller group
                 foreach (var sellerGroup in itemsBySeller)
                 {
-                    long sellerId = sellerGroup.Key;
                     var sellerCartItems = sellerGroup.ToList();
-
-                    // 3.1 Calculate total for this seller's items
                     decimal sellerTotalAmount = sellerCartItems.Sum(item => item.Quantity * item.Product.Price);
 
-                    // 3.2 Create a new Order for this seller
+                    // Determine initial status and if transaction record is needed now
+                    string initialStatus = "Pending";
+                    Transaction? orderTransaction = null;
+
+                    if (!requiresPaymentSimulation)
+                    {
+                        // For CashOnDelivery, set status and create completed transaction now
+                        initialStatus = "Processing"; // Or keep Pending based on workflow
+                        orderTransaction = new Transaction
+                        {
+                             Amount = sellerTotalAmount,
+                             PaymentMethod = requestData.PaymentMethod,
+                             TransactionDate = DateTime.UtcNow,
+                             // OrderId will be set after saving Order
+                        };
+                         await _context.Transactions.AddAsync(orderTransaction);
+                         // Note: SaveChanges for Transaction will happen after Order is saved
+                    }
+                    // For simulated payments, status remains Pending, no transaction record yet.
+
                     var newOrder = new Order
                     {
                         UserId = userId,
                         CreatedAt = DateTime.UtcNow,
                         TotalPrice = sellerTotalAmount,
-                        Status = "Pending",
-                        // You could potentially add a SellerId to the Order model itself if needed,
-                        // otherwise, the link is implicit through the OrderItems -> Product -> SellerId.
+                        Status = initialStatus,
+                        // Transaction = orderTransaction // Incorrect: Assigning single to non-existent property
                     };
+                    
+                    // Correct: Add the transaction to the collection if it exists
+                    if (orderTransaction != null)
+                    {
+                        newOrder.Transactions.Add(orderTransaction); 
+                    }
+
                     await _context.Orders.AddAsync(newOrder);
                     await _context.SaveChangesAsync(); // Save to get OrderId
                     long orderId = newOrder.Id;
-                    createdOrderIds.Add(orderId);
+                    
+                    createdOrdersInfo.Add(new { orderId = orderId, sellerId = sellerGroup.Key });
 
-                    // 3.3 Create OrderItems for this specific order
                     var orderItems = sellerCartItems.Select(cartItem => new OrderItem
                     {
                         OrderId = orderId,
                         ProductId = cartItem.ProductId.Value,
                         Quantity = cartItem.Quantity,
-                        Price = cartItem.Product.Price // Price at time of order
-                        // Ensure OrderItem model has necessary fields
+                        Price = cartItem.Product.Price
                     }).ToList();
                     await _context.OrderItems.AddRangeAsync(orderItems);
                 }
 
-                // 4. Clear the original cart items (all of them)
-                _context.Carts.RemoveRange(cartItems);
+                // Only clear cart if it was NOT a simulated payment (cart needed for payment confirmation)
+                if (!requiresPaymentSimulation)
+                {
+                     _context.Carts.RemoveRange(cartItems);
+                }
 
-                // 5. Save all changes (OrderItems creation and Cart removal)
-                await _context.SaveChangesAsync();
-
-                // 6. Commit Transaction
+                await _context.SaveChangesAsync(); // Saves OrderItems, Transaction OrderId update, and Cart removal
                 await transaction.CommitAsync();
 
-                // 7. Return success response with list of created order IDs
-                return Ok(new { message = "Order(s) created successfully!", orderIds = createdOrderIds });
+                return Ok(new {
+                     message = requiresPaymentSimulation ? "Order created. Proceed to payment simulation." : "Order(s) created successfully!",
+                     orderIds = createdOrdersInfo.Select(o => ((dynamic)o).orderId).ToList(),
+                     requiresPayment = requiresPaymentSimulation,
+                     // Return the first orderId for redirection if simulating payment for simplicity
+                     // A more robust solution might return info for all orders requiring payment.
+                     primaryOrderId = requiresPaymentSimulation ? createdOrdersInfo.Select(o => ((dynamic)o).orderId).FirstOrDefault() : (long?)null
+                      });
             }
             catch (Exception ex)
             {
                 await transaction.RollbackAsync();
-                Console.WriteLine($"Error creating split orders for user {userId}: {ex}");
+                Console.WriteLine($"Error in CreateOrder: {ex}");
                 return StatusCode(StatusCodes.Status500InternalServerError, "An error occurred while creating the order(s).");
             }
         }
@@ -247,5 +269,16 @@ namespace TestMasterPeace.DTOs.OrderDTOs
         public int Quantity { get; set; }
         public decimal Price { get; set; }
         public string? ImageUrl { get; set; }
+    }
+}
+
+// --- DTO Definition for Create Order Request ---
+namespace TestMasterPeace.DTOs.CheckoutDTOs
+{
+    public class CreateOrderRequestDTO
+    {
+        [System.ComponentModel.DataAnnotations.Required]
+        public string PaymentMethod { get; set; }
+        // Add other fields like ShippingAddressId if needed
     }
 } 
