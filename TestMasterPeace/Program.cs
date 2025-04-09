@@ -111,7 +111,8 @@ app.UseHttpsRedirection();
 
 // WARNING: DEBUGGING ONLY - Apply a less secure policy allowing any origin.
 // REMEMBER TO REVERT THIS before deployment!
-app.UseCors(policy => policy.AllowAnyHeader().AllowAnyMethod().AllowAnyOrigin());
+//app.UseCors(policy => policy.AllowAnyHeader().AllowAnyMethod().AllowAnyOrigin());
+app.UseCors(MyAllowSpecificOrigins);
 
 app.UseAuthentication();
 app.UseAuthorization();

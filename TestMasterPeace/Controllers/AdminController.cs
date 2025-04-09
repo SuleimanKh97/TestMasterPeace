@@ -98,10 +98,58 @@ namespace TestMasterPeace.Controllers
             var user = await _dbContext.Users.FindAsync(id);
             if (user == null) return NotFound(new { message = "User not found" });
 
+            // Prevent deleting the admin themselves? Or handled in frontend?
+            // Add logic here if needed, e.g., check if user.Role == "Admin"
+
             _dbContext.Users.Remove(user);
             await _dbContext.SaveChangesAsync();
 
             return Ok(new { message = "User deleted successfully" });
+        }
+
+        // Update User Details
+        [HttpPut("users/{id}")]
+        public async Task<IActionResult> UpdateUser(long id, [FromBody] UpdateUserModel updatedUserData)
+        {
+            var userToUpdate = await _dbContext.Users.FindAsync(id);
+            if (userToUpdate == null) return NotFound(new { message = "User not found" });
+
+            // Check for potential conflicts with other users
+            if (await _dbContext.Users.AnyAsync(u => u.Id != id && (u.Username == updatedUserData.Username || u.Email == updatedUserData.Email)))
+            {
+                return BadRequest(new { message = "Username or Email is already taken by another user." });
+            }
+
+            // Update user properties
+            userToUpdate.Username = updatedUserData.Username;
+            userToUpdate.Email = updatedUserData.Email;
+            userToUpdate.Role = updatedUserData.Role; // Make sure Role is validated if needed
+            // Do NOT update password here. Use a separate endpoint for password changes.
+
+            try
+            {
+                await _dbContext.SaveChangesAsync();
+                // Return the updated user data (excluding sensitive info like password)
+                 var updatedUserResponse = new
+                {
+                    userToUpdate.Id,
+                    userToUpdate.Username,
+                    userToUpdate.Email,
+                    userToUpdate.Role,
+                    userToUpdate.CreatedAt
+                };
+                return Ok(new { message = "User updated successfully", user = updatedUserResponse });
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                 // Handle concurrency issues if necessary
+                return Conflict(new { message = "The user data was modified by another process. Please reload and try again." });
+            }
+            catch (Exception ex)
+            {
+                // Log the exception (ex)
+                return StatusCode(500, new { message = "An error occurred while updating the user." });
+            }
         }
 
         // ✅ استرجاع جميع المنتجات للمراجعة
@@ -137,4 +185,12 @@ namespace TestMasterPeace.Controllers
 
 
     }
+}
+
+// Define the model for the update request
+public class UpdateUserModel
+{
+    public required string Username { get; set; }
+    public required string Email { get; set; }
+    public required string Role { get; set; } // Consider validation or enum
 }
