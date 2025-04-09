@@ -1,4 +1,4 @@
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using TestMasterPeace.Models;
 using TestMasterPeace.Services;
 using Microsoft.IdentityModel.Tokens;
@@ -89,7 +89,13 @@ builder.Services.AddCors(options =>
                           // Add .AllowCredentials() if you need to send cookies/auth headers cross-origin
                       });
 });
-
+builder.Services.AddControllers()
+        .AddJsonOptions(options =>
+        {
+            // تجاهل الدورات المرجعية عند تحويل الكائنات إلى JSON
+            options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
+            // يمكنك أيضاً استخدام .Preserve إذا كنت بحاجة للحفاظ على المراجع في JSON
+        });
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
