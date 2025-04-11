@@ -4,7 +4,10 @@ using Microsoft.EntityFrameworkCore;
 using TestMasterPeace.Models;
 using TestMasterPeace.Helpers;
 using Microsoft.AspNetCore.Authorization;
-
+using System.Linq;
+using System.Threading.Tasks;
+using TestMasterPeace.DTOs.AdminDTOs;
+using System.Collections.Generic;
 
 namespace TestMasterPeace.Controllers
 {
@@ -173,17 +176,59 @@ namespace TestMasterPeace.Controllers
             return Ok(new { message = "Product deleted successfully" });
         }
 
-        // ✅ استرجاع جميع الطلبات
-        [HttpGet("orders")]
+        /* Comment out the ambiguous simpler endpoint 
+        // ✅ استرجاع جميع الطلبات (Simple version - Ambiguous)
+        [HttpGet("orders")] // This route can cause ambiguity with [HttpGet("Orders")]
         public async Task<IActionResult> GetOrders()
         {
             var orders = await _dbContext.Orders.ToListAsync();
             return Ok(orders);
         }
+        */
 
+        // GET: /Admin/Orders (Keep this detailed version)
+        [HttpGet("Orders")]
+        public async Task<ActionResult<IEnumerable<AdminOrderDetailDTO>>> GetAllOrders()
+        {
+            var orders = await _dbContext.Orders
+                .Include(o => o.User) // Include Buyer info
+                .Include(o => o.Transactions) // Include Transactions to get PaymentMethod
+                .Include(o => o.OrderItems) // Include OrderItems
+                    .ThenInclude(oi => oi.Product) // Include Product for each OrderItem
+                        .ThenInclude(p => p.Seller) // Include Seller for each Product
+                .OrderByDescending(o => o.CreatedAt) // Show newest first
+                .ToListAsync();
 
+            if (orders == null || !orders.Any())
+            {
+                return Ok(new List<AdminOrderDetailDTO>()); // Return empty list if no orders
+            }
 
+            // Manual Mapping from Order entities to AdminOrderDetailDTOs
+            var orderDTOs = orders.Select(order => new AdminOrderDetailDTO
+            {
+                OrderId = order.Id,
+                BuyerUserId = order.User?.Id ?? 0, // Handle potential null user
+                BuyerUsername = order.User?.Username ?? "Unknown", // Handle potential null user
+                OrderDate = order.CreatedAt ?? DateTime.MinValue, // Handle potential null date
+                TotalAmount = order.TotalPrice,
+                Status = order.Status,
+                PaymentMethod = order.Transactions.FirstOrDefault()?.PaymentMethod ?? "N/A", // Get from first transaction
+                TransactionDate = order.Transactions.FirstOrDefault()?.TransactionDate, // Get from first transaction
+                OrderItems = order.OrderItems.Select(oi => new AdminOrderItemDTO
+                {
+                    ProductId = (long)oi.ProductId,
+                    ProductName = oi.Product?.Name ?? "Unknown Product",
+                    Quantity = oi.Quantity,
+                    Price = oi.Price,
+                    ImageUrl = oi.Product?.Img ?? "", // Handle potential null product/image
+                    SellerId = oi.Product?.SellerId,
+                    SellerUsername = oi.Product?.Seller?.Username ?? "Unknown Seller"
+                }).ToList()
+            }).ToList();
 
+            return Ok(orderDTOs);
+        }
     }
 }
 

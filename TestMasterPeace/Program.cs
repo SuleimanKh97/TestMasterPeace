@@ -82,11 +82,15 @@ builder.Services.AddCors(options =>
     options.AddPolicy(name: MyAllowSpecificOrigins,
                       policy  =>
                       {
-                          policy.WithOrigins("https://localhost:62043", // Your Angular App's origin (check if different)
-                                             "http://localhost:4200") // Common default Angular dev origin
-                                .AllowAnyHeader() // Allow any standard header
-                                .AllowAnyMethod(); // Allow GET, POST, PUT, DELETE, OPTIONS etc.
-                          // Add .AllowCredentials() if you need to send cookies/auth headers cross-origin
+                          // Allow both common Angular origins (HTTPS/HTTP)
+                          policy.WithOrigins(
+                                    "https://localhost:62043", // Add the origin from the error message
+                                    "http://localhost:4200"    // Keep the default http origin
+                                 )
+                                .AllowAnyHeader()
+                                .AllowAnyMethod()
+                                .AllowCredentials();
+                          // Consider .AllowCredentials()
                       });
 });
 builder.Services.AddControllers()
@@ -103,22 +107,14 @@ if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
     app.UseSwaggerUI();
-    // Optional: Allow any origin in development (less secure, use specific origins for production)
-    // app.UseCors(policy => policy.AllowAnyHeader().AllowAnyMethod().AllowAnyOrigin());
 }
 
 app.UseHttpsRedirection();
 
-// ** IMPORTANT: Add UseCors() middleware HERE **
-// It must be after UseRouting (implicitly added) and before UseAuthentication/UseAuthorization/MapControllers
-
-// Apply the specific CORS policy (Original - commented out for debugging)
-// app.UseCors(MyAllowSpecificOrigins);
-
-// WARNING: DEBUGGING ONLY - Apply a less secure policy allowing any origin.
-// REMEMBER TO REVERT THIS before deployment!
-//app.UseCors(policy => policy.AllowAnyHeader().AllowAnyMethod().AllowAnyOrigin());
-app.UseCors(MyAllowSpecificOrigins);
+// Use the specific CORS policy that allows credentials and specific origins
+app.UseCors(MyAllowSpecificOrigins); 
+// Remove or comment out the less secure temporary policy:
+// app.UseCors(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()); 
 
 app.UseAuthentication();
 app.UseAuthorization();
