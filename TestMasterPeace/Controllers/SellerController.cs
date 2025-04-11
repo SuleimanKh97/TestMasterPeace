@@ -196,42 +196,56 @@ namespace TestMasterPeace.Controllers
         public async Task<IActionResult> GetMyOrderItems()
         {
             long sellerId;
-            try
-            {
-                sellerId = GetCurrentSellerId();
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                return Unauthorized(new { message = ex.Message });
-            }
+            try { sellerId = GetCurrentSellerId(); }
+            catch (UnauthorizedAccessException ex) { return Unauthorized(new { message = ex.Message }); }
 
             try
             {
                 var sellerOrderItems = await _dbContext.OrderItems
-                    .Include(oi => oi.Product)
-                    .Include(oi => oi.Order)
-                    .Where(oi => oi.Product != null && oi.Product.SellerId == sellerId &&
-                                oi.Order != null && oi.Order.Status.ToLower() != "cancelled")
+                    // Ensure necessary Includes are present and correct
+                    .Include(oi => oi.Product) // For ProductName, ImageUrl, Seller check
+                    .Include(oi => oi.Order)   // Base Order object needed
+                        .ThenInclude(o => o.User) // Include the Buyer (User) associated with the Order
+                    .Where(oi => oi.Product != null 
+                                 && oi.Product.SellerId == sellerId 
+                                 && oi.Order != null // Ensure Order exists
+                                 && oi.Order.Status.ToLower() != "cancelled") // Exclude cancelled orders
                     .OrderByDescending(oi => oi.Order.CreatedAt)
-                    .Select(oi => new SellerOrderItemDTO
+                    .Select(oi => new SellerOrderItemDTO // Map to the DTO
                     {
+                        // Existing Item details
                         OrderItemId = oi.Id,
-                        OrderId = (long)oi.OrderId,
-                        OrderDate = oi.Order.CreatedAt,
-                        OrderStatus = oi.Order.Status,
-                        ProductId = (long)oi.ProductId,
-                        ProductName = oi.Product.Name,
+                        OrderId = oi.OrderId.Value,
+                        OrderDate = oi.Order.CreatedAt, // Order date from the included Order
+                        OrderStatus = oi.Order.Status,  // Order status from the included Order
+                        ProductId = oi.ProductId.Value,
+                        ProductName = oi.Product.Name, // From included Product
                         Quantity = oi.Quantity,
                         PricePerItem = oi.Price,
-                        ImageUrl = oi.Product.Img,
+                        ImageUrl = oi.Product.Img,   // From included Product (using Img property)
+                        
+                        // --- Populate Buyer and Shipping Info --- 
+                        // Access User info via included Order.User
+                        BuyerUsername = oi.Order.User != null ? oi.Order.User.Username : "Unknown Buyer", 
+                        // Access Shipping info directly from the included Order
+                        ShippingPhoneNumber = oi.Order.ShippingPhoneNumber, 
+                        ShippingAddressLine1 = oi.Order.ShippingAddressLine1,
+                        ShippingAddressLine2 = oi.Order.ShippingAddressLine2,
+                        ShippingCity = oi.Order.ShippingCity
+                        // ---------------------------------------
                     })
                     .ToListAsync();
+
+                // Log the result count before returning (for debugging)
+                Console.WriteLine($"Found {sellerOrderItems.Count} order items for seller {sellerId}"); 
 
                 return Ok(sellerOrderItems);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Error fetching order items for seller {sellerId}: {ex}");
+                // Log the full exception details for better debugging
+                Console.WriteLine(ex.ToString()); 
                 return StatusCode(StatusCodes.Status500InternalServerError, "An error occurred while fetching your order items.");
             }
         }
@@ -325,6 +339,14 @@ namespace TestMasterPeace.Controllers
             public int Quantity { get; set; }
             public decimal PricePerItem { get; set; }
             public string? ImageUrl { get; set; }
+
+            // --- Add Buyer and Shipping Info --- 
+            public string BuyerUsername { get; set; } // Username of the buyer
+            public string ShippingPhoneNumber { get; set; }
+            public string ShippingAddressLine1 { get; set; }
+            public string? ShippingAddressLine2 { get; set; }
+            public string ShippingCity { get; set; }
+            // -----------------------------------
         }
 
         // --- DTO for Update Order Status Request ---

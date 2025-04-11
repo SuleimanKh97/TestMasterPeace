@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using TestMasterPeace.Models;
 using TestMasterPeace.DTOs.OrderDTOs; // Define DTOs below
 using TestMasterPeace.DTOs.CheckoutDTOs; // Add namespace for new DTO
+using System.ComponentModel.DataAnnotations;
 
 namespace TestMasterPeace.Controllers
 {
@@ -98,6 +99,11 @@ namespace TestMasterPeace.Controllers
                 return BadRequest(new { message = "Payment method is required." });
             }
 
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
             var cartItems = await _context.Carts
                 .Where(c => c.UserId == userId)
                 .Include(c => c.Product)
@@ -123,7 +129,7 @@ namespace TestMasterPeace.Controllers
                     decimal sellerTotalAmount = sellerCartItems.Sum(item => item.Quantity * item.Product.Price);
 
                     // Determine initial status and if transaction record is needed now
-                    string initialStatus = "Pending";
+                    string initialStatus = requiresPaymentSimulation ? "Pending" : "Processing";
                     Transaction? orderTransaction = null;
 
                     if (!requiresPaymentSimulation)
@@ -148,7 +154,13 @@ namespace TestMasterPeace.Controllers
                         CreatedAt = DateTime.UtcNow,
                         TotalPrice = sellerTotalAmount,
                         Status = initialStatus,
-                        // Transaction = orderTransaction // Incorrect: Assigning single to non-existent property
+                        
+                        // --- Assign Shipping Info --- 
+                        ShippingPhoneNumber = requestData.ShippingPhoneNumber,
+                        ShippingAddressLine1 = requestData.ShippingAddressLine1,
+                        ShippingAddressLine2 = requestData.ShippingAddressLine2, // Handles null
+                        ShippingCity = requestData.ShippingCity
+                        // --------------------------
                     };
                     
                     // Correct: Add the transaction to the collection if it exists
@@ -299,6 +311,22 @@ namespace TestMasterPeace.DTOs.CheckoutDTOs
     {
         [System.ComponentModel.DataAnnotations.Required]
         public string PaymentMethod { get; set; }
-        // Add other fields like ShippingAddressId if needed
+
+        // --- Add Shipping Info DTO Properties ---
+        [Required]
+        [StringLength(15)]
+        public string ShippingPhoneNumber { get; set; }
+
+        [Required]
+        [StringLength(100)]
+        public string ShippingAddressLine1 { get; set; }
+
+        [StringLength(100)]
+        public string? ShippingAddressLine2 { get; set; } // Optional
+
+        [Required]
+        [StringLength(50)]
+        public string ShippingCity { get; set; }
+        // ----------------------------------------
     }
 } 
