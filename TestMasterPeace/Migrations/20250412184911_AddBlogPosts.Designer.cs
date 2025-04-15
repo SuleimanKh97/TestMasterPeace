@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using TestMasterPeace.Models;
 
@@ -11,9 +12,11 @@ using TestMasterPeace.Models;
 namespace TestMasterPeace.Migrations
 {
     [DbContext(typeof(MasterPeiceContext))]
-    partial class MasterPeiceContextModelSnapshot : ModelSnapshot
+    [Migration("20250412184911_AddBlogPosts")]
+    partial class AddBlogPosts
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -21,59 +24,6 @@ namespace TestMasterPeace.Migrations
                 .HasAnnotation("Relational:MaxIdentifierLength", 128);
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
-
-            modelBuilder.Entity("TestMasterPeace.Models.BlogPost", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasColumnName("id");
-
-                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
-
-                    b.Property<long?>("AuthorId")
-                        .HasColumnType("bigint")
-                        .HasColumnName("author_id");
-
-                    b.Property<string>("Content")
-                        .IsRequired()
-                        .HasColumnType("nvarchar(max)")
-                        .HasColumnName("content");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("datetime")
-                        .HasColumnName("created_at")
-                        .HasDefaultValueSql("(getdate())");
-
-                    b.Property<string>("ImageUrl")
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)")
-                        .HasColumnName("image_url");
-
-                    b.Property<bool>("IsPublished")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasColumnName("is_published")
-                        .HasDefaultValueSql("((0))");
-
-                    b.Property<string>("Title")
-                        .IsRequired()
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)")
-                        .HasColumnName("title");
-
-                    b.Property<DateTime?>("UpdatedAt")
-                        .HasColumnType("datetime")
-                        .HasColumnName("updated_at");
-
-                    b.HasKey("Id")
-                        .HasName("PK__BlogPost__3213E83F");
-
-                    b.HasIndex("AuthorId");
-
-                    b.ToTable("BlogPosts");
-                });
 
             modelBuilder.Entity("TestMasterPeace.Models.Cart", b =>
                 {
@@ -477,16 +427,6 @@ namespace TestMasterPeace.Migrations
                     b.ToTable("Users");
                 });
 
-            modelBuilder.Entity("TestMasterPeace.Models.BlogPost", b =>
-                {
-                    b.HasOne("TestMasterPeace.Models.User", "Author")
-                        .WithMany("BlogPosts")
-                        .HasForeignKey("AuthorId")
-                        .HasConstraintName("FK__BlogPosts__author_id");
-
-                    b.Navigation("Author");
-                });
-
             modelBuilder.Entity("TestMasterPeace.Models.Cart", b =>
                 {
                     b.HasOne("TestMasterPeace.Models.Product", "Product")
@@ -608,8 +548,6 @@ namespace TestMasterPeace.Migrations
 
             modelBuilder.Entity("TestMasterPeace.Models.User", b =>
                 {
-                    b.Navigation("BlogPosts");
-
                     b.Navigation("Carts");
 
                     b.Navigation("ContactUs");

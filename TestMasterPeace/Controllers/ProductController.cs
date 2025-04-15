@@ -8,6 +8,7 @@ using System.Linq;
 using Microsoft.AspNetCore.Authorization; 
 using System.Security.Claims; 
 // using TestMasterPeace.DTOs.ProductDetail; // DTO is defined below, no need for using here
+using Microsoft.EntityFrameworkCore.Query.SqlExpressions;
 
 namespace TestMasterPeace.Controllers; // Assuming file-scoped namespace
 
@@ -16,10 +17,39 @@ namespace TestMasterPeace.Controllers; // Assuming file-scoped namespace
 public class ProductController(MasterPeiceContext context) : ControllerBase
 {
     [HttpGet("listProduct")]
-    public async Task<IActionResult> GetProducts()
+    public async Task<IActionResult> GetProducts(
+        [FromQuery] int? categoryId,
+        [FromQuery] decimal? minPrice,
+        [FromQuery] decimal? maxPrice,
+        [FromQuery] string? searchQuery)
     {
-        var products = await context.Products
-            .Include(p => p.Seller)
+        var query = context.Products.Include(p => p.Seller).AsQueryable();
+
+        if (categoryId.HasValue && categoryId > 0)
+        {
+            query = query.Where(p => p.CategoryId == categoryId.Value);
+        }
+
+        if (minPrice.HasValue)
+        {
+            query = query.Where(p => p.Price >= minPrice.Value);
+        }
+        if (maxPrice.HasValue)
+        {
+            query = query.Where(p => p.Price <= maxPrice.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(searchQuery))
+        {
+            // Use EF.Functions.Like for potentially better SQL translation with Arabic characters
+            // The pattern "%searchTerm%" searches for the term anywhere in the string.
+            var searchTermPattern = $"%{searchQuery.Trim()}%";
+
+            query = query.Where(p => EF.Functions.Like(p.Name, searchTermPattern) ||
+                                     (p.Description != null && EF.Functions.Like(p.Description, searchTermPattern)));
+        }
+
+        var products = await query
             .Select(p => new ShopProductDTO
             {
                 Id = (int)p.Id,
@@ -27,11 +57,13 @@ public class ProductController(MasterPeiceContext context) : ControllerBase
                 Description = p.Description,
                 Price = p.Price,
                 Img = p.Img,
-                SellerName = p.Seller != null ? p.Seller.Username : "Unknown Seller" // Corrected to Username
+                SellerName = p.Seller != null ? p.Seller.Username : "Unknown Seller"
             })
             .ToListAsync();
+
         return Ok(products);
     }
+
     [HttpPost("NewProduct")]
     public async Task<IActionResult> PostProduct(CreateProductRequest newProduct)
     {
@@ -111,6 +143,16 @@ public class ProductController(MasterPeiceContext context) : ControllerBase
         await context.SaveChangesAsync();
 
         return Ok(new { message = "Product deleted successfully" });
+    }
+
+    [HttpGet("categories")]
+    public async Task<IActionResult> GetCategories()
+    {
+        var categories = await context.Categories
+                                     .Select(c => new { c.Id, c.Name })
+                                     .OrderBy(c => c.Name)
+                                     .ToListAsync();
+        return Ok(categories);
     }
 }
 

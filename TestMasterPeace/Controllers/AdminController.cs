@@ -8,6 +8,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using TestMasterPeace.DTOs.AdminDTOs;
 using System.Collections.Generic;
+using TestMasterPeace.DTOs;
 
 namespace TestMasterPeace.Controllers
 {
@@ -174,6 +175,137 @@ namespace TestMasterPeace.Controllers
             await _dbContext.SaveChangesAsync();
 
             return Ok(new { message = "Product deleted successfully" });
+        }
+
+        // Blog Management Endpoints
+        [HttpGet("blog")]
+        public async Task<IActionResult> GetBlogPosts()
+        {
+            var blogPosts = await _dbContext.BlogPosts
+                .Include(bp => bp.Author)
+                .OrderByDescending(bp => bp.CreatedAt)
+                .Select(bp => new AdminBlogPostListDTO
+                {
+                    Id = bp.Id,
+                    Title = bp.Title,
+                    CreatedAt = bp.CreatedAt,
+                    UpdatedAt = bp.UpdatedAt,
+                    IsPublished = bp.IsPublished,
+                    AuthorName = bp.Author != null ? bp.Author.Username : "Anonymous"
+                })
+                .ToListAsync();
+
+            return Ok(blogPosts);
+        }
+
+        [HttpGet("blog/{id}")]
+        public async Task<IActionResult> GetBlogPostById(int id)
+        {
+            var blogPost = await _dbContext.BlogPosts
+                .Include(bp => bp.Author)
+                .FirstOrDefaultAsync(bp => bp.Id == id);
+
+            if (blogPost == null)
+            {
+                return NotFound(new { message = "Blog post not found" });
+            }
+
+            var blogPostDto = new BlogPostDetailDTO
+            {
+                Id = blogPost.Id,
+                Title = blogPost.Title,
+                Content = blogPost.Content,
+                ImageUrl = blogPost.ImageUrl,
+                AuthorName = blogPost.Author != null ? blogPost.Author.Username : "Anonymous",
+                CreatedAt = blogPost.CreatedAt,
+                UpdatedAt = blogPost.UpdatedAt
+            };
+
+            return Ok(blogPostDto);
+        }
+
+        [HttpPost("blog")]
+        public async Task<IActionResult> CreateBlogPost([FromBody] CreateBlogPostDTO createBlogPostDto)
+        {
+            // Sanitize HTML content if needed to prevent XSS
+            // createBlogPostDto.Content = HtmlSanitizer.Sanitize(createBlogPostDto.Content);
+
+            // Get current user ID (admin)
+            var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            if (string.IsNullOrEmpty(userId) || !long.TryParse(userId, out var authorId))
+            {
+                return BadRequest(new { message = "Invalid user ID" });
+            }
+
+            var blogPost = new BlogPost
+            {
+                Title = createBlogPostDto.Title,
+                Content = createBlogPostDto.Content,
+                ImageUrl = createBlogPostDto.ImageUrl,
+                AuthorId = (int)authorId,
+                CreatedAt = DateTime.UtcNow,
+                IsPublished = createBlogPostDto.IsPublished
+            };
+
+            await _dbContext.BlogPosts.AddAsync(blogPost);
+            await _dbContext.SaveChangesAsync();
+
+            return CreatedAtAction(nameof(GetBlogPostById), new { id = blogPost.Id }, blogPost);
+        }
+
+        [HttpPut("blog/{id}")]
+        public async Task<IActionResult> UpdateBlogPost(int id, [FromBody] UpdateBlogPostDTO updateBlogPostDto)
+        {
+            var blogPost = await _dbContext.BlogPosts.FindAsync(id);
+            if (blogPost == null)
+            {
+                return NotFound(new { message = "Blog post not found" });
+            }
+
+            // Update properties if they are provided
+            if (updateBlogPostDto.Title != null)
+            {
+                blogPost.Title = updateBlogPostDto.Title;
+            }
+
+            if (updateBlogPostDto.Content != null)
+            {
+                // Sanitize HTML content if needed to prevent XSS
+                // updateBlogPostDto.Content = HtmlSanitizer.Sanitize(updateBlogPostDto.Content);
+                blogPost.Content = updateBlogPostDto.Content;
+            }
+
+            if (updateBlogPostDto.ImageUrl != null)
+            {
+                blogPost.ImageUrl = updateBlogPostDto.ImageUrl;
+            }
+
+            if (updateBlogPostDto.IsPublished.HasValue)
+            {
+                blogPost.IsPublished = updateBlogPostDto.IsPublished.Value;
+            }
+
+            blogPost.UpdatedAt = DateTime.UtcNow;
+
+            _dbContext.BlogPosts.Update(blogPost);
+            await _dbContext.SaveChangesAsync();
+
+            return Ok(new { message = "Blog post updated successfully" });
+        }
+
+        [HttpDelete("blog/{id}")]
+        public async Task<IActionResult> DeleteBlogPost(int id)
+        {
+            var blogPost = await _dbContext.BlogPosts.FindAsync(id);
+            if (blogPost == null)
+            {
+                return NotFound(new { message = "Blog post not found" });
+            }
+
+            _dbContext.BlogPosts.Remove(blogPost);
+            await _dbContext.SaveChangesAsync();
+
+            return Ok(new { message = "Blog post deleted successfully" });
         }
 
         /* Comment out the ambiguous simpler endpoint 

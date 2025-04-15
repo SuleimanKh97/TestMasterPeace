@@ -35,6 +35,8 @@ public partial class MasterPeiceContext : DbContext
 
     public virtual DbSet<User> Users { get; set; }
 
+    public virtual DbSet<BlogPost> BlogPosts { get; set; }
+
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
 #warning To protect potentially sensitive information in your connection string, you should move it out of source code. You can avoid scaffolding the connection string by using the Name= syntax to read it from configuration - see https://go.microsoft.com/fwlink/?linkid=2131148. For more guidance on storing connection strings, see https://go.microsoft.com/fwlink/?LinkId=723263.
         => optionsBuilder.UseSqlServer("Server=DESKTOP-DCT50HS;Database=MasterPeice;Trusted_Connection=True;TrustServerCertificate=True;");
@@ -262,6 +264,36 @@ public partial class MasterPeiceContext : DbContext
             entity.Property(e => e.Username)
                 .HasMaxLength(50)
                 .HasColumnName("username");
+        });
+
+        modelBuilder.Entity<BlogPost>(entity =>
+        {
+            entity.HasKey(e => e.Id).HasName("PK__BlogPost__3213E83F");
+
+            entity.Property(e => e.Id).HasColumnName("id");
+            entity.Property(e => e.Title)
+                .HasMaxLength(255)
+                .HasColumnName("title");
+            entity.Property(e => e.Content)
+                .HasColumnName("content");
+            entity.Property(e => e.ImageUrl)
+                .HasMaxLength(255)
+                .HasColumnName("image_url");
+            entity.Property(e => e.AuthorId).HasColumnName("author_id");
+            entity.Property(e => e.CreatedAt)
+                .HasDefaultValueSql("(getdate())")
+                .HasColumnType("datetime")
+                .HasColumnName("created_at");
+            entity.Property(e => e.UpdatedAt)
+                .HasColumnType("datetime")
+                .HasColumnName("updated_at");
+            entity.Property(e => e.IsPublished)
+                .HasDefaultValueSql("((0))")
+                .HasColumnName("is_published");
+
+            entity.HasOne(d => d.Author).WithMany(p => p.BlogPosts)
+                .HasForeignKey(d => d.AuthorId)
+                .HasConstraintName("FK__BlogPosts__author_id");
         });
 
         OnModelCreatingPartial(modelBuilder);
