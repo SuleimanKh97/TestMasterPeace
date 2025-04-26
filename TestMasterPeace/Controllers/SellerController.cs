@@ -26,30 +26,153 @@ namespace TestMasterPeace.Controllers
 
         private long GetCurrentSellerId()
         {
-            var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
-            if (long.TryParse(userIdClaim, out long userId))
+            try
             {
-                return userId;
+                // Log all claims for debugging
+                Console.WriteLine("User claims:");
+                foreach (var claim in User.Claims)
+                {
+                    Console.WriteLine($"  {claim.Type}: {claim.Value}");
+                }
+
+                // First try standard .NET Core claim type
+                var userIdClaim = User.Claims.FirstOrDefault(c => c.Type == ClaimTypes.NameIdentifier)?.Value;
+                
+                // If not found, try the JWT specific format
+                if (string.IsNullOrEmpty(userIdClaim))
+                {
+                    userIdClaim = User.Claims.FirstOrDefault(c => 
+                        c.Type == "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier")?.Value;
+                }
+                
+                // If still not found, try other common claim types
+                if (string.IsNullOrEmpty(userIdClaim))
+                {
+                    userIdClaim = User.Claims.FirstOrDefault(c => c.Type == "nameidentifier")?.Value;
+                }
+                
+                if (string.IsNullOrEmpty(userIdClaim))
+                {
+                    userIdClaim = User.Claims.FirstOrDefault(c => c.Type == "sub")?.Value;
+                }
+                
+                if (string.IsNullOrEmpty(userIdClaim))
+                {
+                    userIdClaim = User.Claims.FirstOrDefault(c => c.Type == "id")?.Value;
+                }
+
+                Console.WriteLine($"Found user ID claim: {userIdClaim}");
+                
+                if (string.IsNullOrEmpty(userIdClaim))
+                {
+                    Console.WriteLine("ERROR: No user ID claim found in token");
+                    throw new UnauthorizedAccessException("Seller ID not found in token.");
+                }
+
+                if (long.TryParse(userIdClaim, out long userId))
+                {
+                    Console.WriteLine($"Successfully parsed user ID: {userId}");
+                    return userId;
+                }
+                
+                Console.WriteLine($"ERROR: Could not parse '{userIdClaim}' as a long integer");
+                throw new UnauthorizedAccessException("Invalid seller ID format in token.");
             }
-            throw new UnauthorizedAccessException("Seller ID not found or invalid in token.");
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Exception in GetCurrentSellerId: {ex.Message}");
+                throw new UnauthorizedAccessException($"Error retrieving seller ID: {ex.Message}");
+            }
         }
 
         [HttpGet("dashboard")]
         public async Task<IActionResult> GetDashboard()
         {
             var sellerUsername = User.Identity.Name;
-            var seller = await _dbContext.Users.Include(u => u.Products).Include(u => u.Orders)
-                .FirstOrDefaultAsync(u => u.Username == sellerUsername);
+            var sellerId = GetCurrentSellerId(); // No await needed
 
-            if (seller == null || seller.Role != "Seller")
-                return Unauthorized(new { message = "Access denied" });
-
-            return Ok(new
+            try
             {
-                totalProducts = seller.Products.Count,
-                totalOrders = seller.Orders.Count,
-                totalRevenue = seller.Orders.Sum(o => o.TotalPrice),
-            });
+                // ابحث عن البائع مع تضمين المنتجات
+                var seller = await _dbContext.Users
+                    .Include(u => u.Products)
+                    .FirstOrDefaultAsync(u => u.Username == sellerUsername);
+
+                if (seller == null || seller.Role != "Seller")
+                    return Unauthorized(new { message = "Access denied" });
+
+                // احسب المنتجات المباعة وغير المباعة
+                int soldProducts = seller.Products.Count(p => p.IsSold);
+                int availableProducts = seller.Products.Count(p => !p.IsSold);
+
+                // احصل على طلبات البائع (من خلال منتجاته)
+                var orderItems = await _dbContext.OrderItems
+                    .Include(oi => oi.Order)
+                    .Include(oi => oi.Product)
+                    .Where(oi => oi.Product != null && oi.Product.SellerId == sellerId && oi.Order != null)
+                    .ToListAsync();
+
+                // احسب إجمالي الطلبات الفريدة
+                var uniqueOrderIds = orderItems
+                    .Select(oi => oi.OrderId)
+                    .Distinct()
+                    .Count();
+
+                // احسب إجمالي الإيرادات
+                decimal totalRevenue = orderItems
+                    .Where(oi => oi.Order.Status.ToLower() != "cancelled")
+                    .Sum(oi => oi.Price * oi.Quantity);
+
+                // احسب الطلبات حسب الحالة
+                var ordersByStatus = orderItems
+                    .GroupBy(oi => oi.Order.Status.ToLower())
+                    .Select(g => new { status = g.Key, count = g.Select(oi => oi.OrderId).Distinct().Count() })
+                    .ToDictionary(x => x.status, x => x.count);
+
+                // احسب المنتجات الأكثر مبيعًا
+                var topProducts = orderItems
+                    .GroupBy(oi => oi.ProductId)
+                    .Select(g => new {
+                        productId = g.Key,
+                        productName = g.First().Product.Name,
+                        totalSold = g.Sum(oi => oi.Quantity),
+                        totalRevenue = g.Sum(oi => oi.Price * oi.Quantity)
+                    })
+                    .OrderByDescending(x => x.totalSold)
+                    .Take(5)
+                    .ToList();
+
+                // إحصائيات المبيعات في الأشهر الأخيرة
+                var sixMonthsAgo = DateTime.Now.AddMonths(-6);
+                var monthlySales = orderItems
+                    .Where(oi => oi.Order.CreatedAt >= sixMonthsAgo && oi.Order.Status.ToLower() != "cancelled")
+                    .GroupBy(oi => new { month = oi.Order.CreatedAt.Value.Month, year = oi.Order.CreatedAt.Value.Year })
+                    .Select(g => new {
+                        month = g.Key.month,
+                        year = g.Key.year,
+                        monthName = new DateTime(g.Key.year, g.Key.month, 1).ToString("MMM"),
+                        totalSales = g.Sum(oi => oi.Price * oi.Quantity)
+                    })
+                    .OrderBy(x => x.year)
+                    .ThenBy(x => x.month)
+                    .ToList();
+
+                return Ok(new {
+                    totalProducts = seller.Products.Count,
+                    soldProducts,
+                    availableProducts,
+                    totalOrders = uniqueOrderIds,
+                    totalRevenue,
+                    ordersByStatus,
+                    topProducts,
+                    monthlySales
+                });
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error in GetDashboard: {ex.Message}");
+                return StatusCode(500, new { message = "حدث خطأ أثناء تحميل لوحة المعلومات" });
+            }
         }
 
         // GET Seller Products
@@ -338,6 +461,248 @@ namespace TestMasterPeace.Controllers
             {
                 Console.WriteLine($"Error updating status for order {orderId} by seller {sellerId}: {ex}");
                 return StatusCode(StatusCodes.Status500InternalServerError, "An error occurred while updating the order status.");
+            }
+        }
+
+        [HttpGet("orders/summary")]
+        [Microsoft.AspNetCore.Cors.EnableCors("_myAllowSpecificOrigins")]
+        public async Task<IActionResult> GetOrdersSummary()
+        {
+            try
+            {
+                Console.WriteLine("Starting GetOrdersSummary method");
+                var username = User.Identity?.Name;
+                Console.WriteLine($"User authenticated as: {username}");
+                
+                long sellerId;
+                try 
+                {
+                    sellerId = GetCurrentSellerId();
+                    Console.WriteLine($"Seller ID retrieved: {sellerId}");
+                }
+                catch (UnauthorizedAccessException ex)
+                {
+                    Console.WriteLine($"Authorization error: {ex.Message}");
+                    return Unauthorized(new { message = ex.Message });
+                }
+
+                // First check if there are any products for this seller
+                var sellerProducts = await _dbContext.Products
+                    .Where(p => p.SellerId == sellerId)
+                    .ToListAsync();
+                    
+                Console.WriteLine($"Found {sellerProducts.Count} products for seller {sellerId}");
+                
+                // Default values for response - ensure all properties are initialized
+                var emptyDict = new Dictionary<string, int>
+                {
+                    { "pending", 0 },
+                    { "processing", 0 },
+                    { "shipped", 0 },
+                    { "delivered", 0 },
+                    { "cancelled", 0 }
+                };
+
+                // Define the structure for recentOrders
+                var emptyRecentOrders = new List<object>();
+                
+                // Define the structure for orderTrends
+                var emptyOrderTrends = Enumerable.Range(1, 6)
+                    .Select(i => 
+                    {
+                        var date = DateTime.Now.AddMonths(-6 + i);
+                        return new
+                        {
+                            month = date.Month,
+                            year = date.Year,
+                            monthName = date.ToString("MMM"),
+                            orderCount = 0,
+                            totalRevenue = 0m
+                        };
+                    })
+                    .ToList<object>();
+                
+                if (sellerProducts.Count == 0)
+                {
+                    Console.WriteLine("No products found for this seller, returning empty summary");
+                    return Ok(new {
+                        totalOrders = 0,
+                        ordersByStatus = emptyDict,
+                        recentOrders = emptyRecentOrders,
+                        orderTrends = emptyOrderTrends,
+                        noProducts = true
+                    });
+                }
+
+                // Get all order items for this seller's products
+                Console.WriteLine("Fetching order items from database...");
+                var orderItems = await _dbContext.OrderItems
+                    .Include(oi => oi.Order)
+                        .ThenInclude(o => o.User)
+                    .Include(oi => oi.Product)
+                    .Where(oi => oi.Product != null && oi.Product.SellerId == sellerId && oi.Order != null)
+                    .ToListAsync();
+
+                Console.WriteLine($"Retrieved {orderItems.Count} order items for seller {sellerId}");
+                
+                if (orderItems.Count == 0)
+                {
+                    Console.WriteLine("No order items found, returning empty summary");
+                    return Ok(new {
+                        totalOrders = 0,
+                        ordersByStatus = emptyDict,
+                        recentOrders = emptyRecentOrders,
+                        orderTrends = emptyOrderTrends,
+                        noOrders = true
+                    });
+                }
+
+                // Get order count by status
+                Console.WriteLine("Calculating order status counts");
+                var ordersByStatus = orderItems
+                    .Where(oi => oi.Order != null && !string.IsNullOrEmpty(oi.Order.Status))
+                    .GroupBy(oi => oi.Order.Status.ToLower())
+                    .Select(g => new { 
+                        status = g.Key, 
+                        count = g.Select(oi => oi.OrderId).Distinct().Count() 
+                    })
+                    .ToDictionary(x => x.status, x => x.count);
+
+                // Add any missing status types with zero counts
+                foreach (var status in emptyDict.Keys.Where(k => !ordersByStatus.ContainsKey(k)))
+                {
+                    ordersByStatus[status] = 0;
+                }
+
+                // Get total count of unique orders
+                var totalOrders = orderItems
+                    .Where(oi => oi.OrderId.HasValue)
+                    .Select(oi => oi.OrderId.Value)
+                    .Distinct()
+                    .Count();
+                Console.WriteLine($"Total unique orders: {totalOrders}");
+
+                // Get recent orders (last 5) - convert to list of objects
+                Console.WriteLine("Building recent orders summary");
+                var recentOrdersData = orderItems
+                    .Where(oi => oi.Order != null && oi.Order.CreatedAt.HasValue)
+                    .OrderByDescending(oi => oi.Order.CreatedAt)
+                    .Select(oi => oi.Order)
+                    .Distinct()
+                    .Take(5)
+                    .Select(o => new {
+                        orderId = o.Id,
+                        date = o.CreatedAt,
+                        status = o.Status,
+                        totalAmount = orderItems.Where(oi => oi.OrderId == o.Id).Sum(oi => oi.Price * oi.Quantity),
+                        buyerName = o.User != null ? o.User.Username : "Unknown"
+                    })
+                    .ToList();
+
+                // Convert to list of objects
+                var recentOrders = recentOrdersData.Select(x => (object)x).ToList();
+
+                // Get order trends by month (last 6 months)
+                Console.WriteLine("Calculating monthly trends");
+                var sixMonthsAgo = DateTime.Now.AddMonths(-6);
+                
+                // Get existing data
+                var monthlyDataDict = orderItems
+                    .Where(oi => oi.Order != null && oi.Order.CreatedAt.HasValue && oi.Order.CreatedAt >= sixMonthsAgo)
+                    .GroupBy(oi => new { month = oi.Order.CreatedAt.Value.Month, year = oi.Order.CreatedAt.Value.Year })
+                    .Select(g => new {
+                        month = g.Key.month,
+                        year = g.Key.year,
+                        monthName = new DateTime(g.Key.year, g.Key.month, 1).ToString("MMM"),
+                        orderCount = g.Select(oi => oi.OrderId).Distinct().Count(),
+                        totalRevenue = g.Sum(oi => oi.Price * oi.Quantity)
+                    })
+                    .ToDictionary(x => new { x.month, x.year });
+                
+                // Create a list to store the trend data
+                var orderTrends = new List<object>();
+                
+                // Fill in all months
+                for (int i = 0; i < 6; i++)
+                {
+                    var date = DateTime.Now.AddMonths(-5 + i);
+                    var key = new { month = date.Month, year = date.Year };
+                    
+                    if (monthlyDataDict.TryGetValue(key, out var monthData))
+                    {
+                        orderTrends.Add(monthData);
+                    }
+                    else
+                    {
+                        orderTrends.Add(new
+                        {
+                            month = date.Month,
+                            year = date.Year,
+                            monthName = date.ToString("MMM"),
+                            orderCount = 0,
+                            totalRevenue = 0m
+                        });
+                    }
+                }
+                
+                // Sort the trends
+                orderTrends = orderTrends
+                    .OrderBy(o => ((dynamic)o).year)
+                    .ThenBy(o => ((dynamic)o).month)
+                    .ToList();
+
+                Console.WriteLine($"Order trends has {orderTrends.Count} entries");
+                Console.WriteLine("GetOrdersSummary completed successfully");
+                
+                // Construct the response
+                var response = new {
+                    totalOrders = totalOrders,
+                    ordersByStatus = ordersByStatus,
+                    recentOrders = recentOrders,
+                    orderTrends = orderTrends
+                };
+                
+                Console.WriteLine($"Response contains: {totalOrders} orders, {ordersByStatus.Count} status types, {recentOrders.Count} recent orders, {orderTrends.Count} monthly trends");
+                
+                return Ok(response);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error in GetOrdersSummary: {ex.Message}");
+                Console.WriteLine($"Exception details: {ex}");
+                Console.WriteLine($"Stack trace: {ex.StackTrace}");
+                return StatusCode(500, new { message = "Error retrieving orders summary", error = ex.Message });
+            }
+        }
+
+        [HttpGet("test")]
+        [Microsoft.AspNetCore.Cors.EnableCors("_myAllowSpecificOrigins")]
+        public IActionResult Test()
+        {
+            return Ok(new { message = "API is working", timestamp = DateTime.Now });
+        }
+
+        [HttpGet("whoami")]
+        [Microsoft.AspNetCore.Cors.EnableCors("_myAllowSpecificOrigins")]
+        public IActionResult WhoAmI()
+        {
+            try
+            {
+                var identity = new
+                {
+                    IsAuthenticated = User.Identity.IsAuthenticated,
+                    Name = User.Identity.Name,
+                    Claims = User.Claims.Select(c => new { Type = c.Type, Value = c.Value }).ToList()
+                };
+
+                return Ok(new { 
+                    message = "Authentication check", 
+                    identity = identity
+                });
+            }
+            catch (Exception ex)
+            {
+                return StatusCode(500, new { message = "Error checking identity", error = ex.Message });
             }
         }
     }

@@ -85,12 +85,12 @@ builder.Services.AddCors(options =>
                           // Allow both common Angular origins (HTTPS/HTTP)
                           policy.WithOrigins(
                                     "https://localhost:62043", // Add the origin from the error message
-                                    "http://localhost:4200"    // Keep the default http origin
+                                    "http://localhost:4200",   // Keep the default http origin
+                                    "https://localhost:7158"   // Add the backend API origin
                                  )
                                 .AllowAnyHeader()
                                 .AllowAnyMethod()
-                                .AllowCredentials()
-                                .SetIsOriginAllowed(_ => true); // Permitir cualquier origen para pruebas de desarrollo
+                                .AllowCredentials();
                       });
 });
 builder.Services.AddControllers()
@@ -114,7 +114,7 @@ app.UseHttpsRedirection();
 // Use the specific CORS policy that allows credentials and specific origins
 app.UseCors(MyAllowSpecificOrigins); 
 
-// La autenticación y autorización deben venir después de CORS
+// Authentication and authorization must come after CORS
 app.UseAuthentication();
 app.UseAuthorization();
 
