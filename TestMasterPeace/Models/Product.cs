@@ -21,6 +21,8 @@ public partial class Product
 
     public string? Img { get; set; }
 
+    public bool IsSold { get; set; } = false;
+
     public virtual ICollection<Cart> Carts { get; set; } = new List<Cart>();
 
     public virtual Category? Category { get; set; }

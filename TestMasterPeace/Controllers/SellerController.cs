@@ -67,16 +67,19 @@ namespace TestMasterPeace.Controllers
             // Adjust the query based on your actual DbContext and relationships
             var products = await _dbContext.Products
                                        .Where(p => p.Seller != null && p.Seller.Username == sellerUsername)
+                                       .Select(p => new
+                                       {
+                                           p.Id,
+                                           p.Name, 
+                                           p.Description,
+                                           p.Price,
+                                           p.CategoryId,
+                                           p.Img,
+                                           p.CreatedAt,
+                                           p.SellerId,
+                                           p.IsSold
+                                       })
                                        .ToListAsync();
-
-            // If you only have SellerId on the Product model:
-            /*
-            var seller = await _dbContext.Users.FirstOrDefaultAsync(u => u.Username == sellerUsername);
-            if (seller == null) return Unauthorized(new { message = "Seller not found." });
-            var products = await _dbContext.Products
-                                       .Where(p => p.SellerId == seller.Id)
-                                       .ToListAsync();
-            */
 
             return Ok(products);
         }
@@ -120,8 +123,21 @@ namespace TestMasterPeace.Controllers
                }
             */
 
-            // Return the product data
-            return Ok(product);
+            // Return the product data with IsSold property
+            var productData = new
+            {
+                product.Id,
+                product.Name,
+                product.Description,
+                product.Price,
+                product.CategoryId,
+                product.Img,
+                product.CreatedAt,
+                product.SellerId,
+                product.IsSold
+            };
+
+            return Ok(productData);
         }
 
         [HttpPost("products")]

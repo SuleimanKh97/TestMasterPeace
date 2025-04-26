@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using TestMasterPeace.Models;
 
@@ -11,9 +12,11 @@ using TestMasterPeace.Models;
 namespace TestMasterPeace.Migrations
 {
     [DbContext(typeof(MasterPeiceContext))]
-    partial class MasterPeiceContextModelSnapshot : ModelSnapshot
+    [Migration("20250426141656_UpdateProductWithIsSold")]
+    partial class UpdateProductWithIsSold
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

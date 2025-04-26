@@ -77,6 +77,7 @@ namespace TestMasterPeace.Controllers
                 // Find the order again, ensure it belongs to user and is Pending/AwaitingPayment
                  var order = await _context.Orders
                     .Include(o => o.OrderItems) // Include items if needed for stock or other logic
+                        .ThenInclude(oi => oi.Product) // Include the products to mark them as sold
                     .FirstOrDefaultAsync(o => o.Id == request.OrderId && o.UserId == userId);
                  
                  if (order == null) { return NotFound(new { message = "Order not found or does not belong to user." }); }
@@ -104,6 +105,15 @@ namespace TestMasterPeace.Controllers
                         // Add other details like a simulated transaction ID if needed
                     };
                     _context.Transactions.Add(paymentTransaction);
+                    
+                    // Mark each product in the order as sold
+                    foreach (var orderItem in order.OrderItems)
+                    {
+                        if (orderItem.Product != null)
+                        {
+                            orderItem.Product.IsSold = true;
+                        }
+                    }
                     
                     // Now clear the user's cart items associated with THIS order
                     // (Requires linking cart items to order items or finding them again)

@@ -89,8 +89,8 @@ builder.Services.AddCors(options =>
                                  )
                                 .AllowAnyHeader()
                                 .AllowAnyMethod()
-                                .AllowCredentials();
-                          // Consider .AllowCredentials()
+                                .AllowCredentials()
+                                .SetIsOriginAllowed(_ => true); // Permitir cualquier origen para pruebas de desarrollo
                       });
 });
 builder.Services.AddControllers()
@@ -113,9 +113,8 @@ app.UseHttpsRedirection();
 
 // Use the specific CORS policy that allows credentials and specific origins
 app.UseCors(MyAllowSpecificOrigins); 
-// Remove or comment out the less secure temporary policy:
-// app.UseCors(policy => policy.AllowAnyOrigin().AllowAnyHeader().AllowAnyMethod()); 
 
+// La autenticación y autorización deben venir después de CORS
 app.UseAuthentication();
 app.UseAuthorization();
 

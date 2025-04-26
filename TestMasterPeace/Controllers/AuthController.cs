@@ -117,10 +117,17 @@ public class AuthController : ControllerBase
             changesMade = true;
         }
 
+        // Update profile image logic
+        if (!string.IsNullOrEmpty(model.ProfileImage) && model.ProfileImage != user.ProfileImg)
+        {
+            user.ProfileImg = model.ProfileImage;
+            changesMade = true;
+        }
+
         if (!changesMade)
         {
             // No actual data changes, return success without new token
-            return Ok(new { message = "No changes detected in profile data.", updatedUser = new { user.Username, user.Email, user.Role } });
+            return Ok(new { message = "No changes detected in profile data.", updatedUser = new { user.Username, user.Email, user.Role, profileImage = user.ProfileImg } });
         }
 
         try
@@ -134,7 +141,7 @@ public class AuthController : ControllerBase
             return Ok(new {
                 message = "Profile updated successfully.",
                 newToken = newToken, // Ensure this is included
-                updatedUser = new { user.Username, user.Email, user.Role }
+                updatedUser = new { user.Username, user.Email, user.Role, profileImage = user.ProfileImg }
             });
         }
         catch (DbUpdateException ex)
@@ -219,6 +226,7 @@ public class UpdateProfileModel
     // Add fields you want to allow updating
     public string? NewUsername { get; set; } // Nullable in case only other fields are updated
     public string? NewEmail { get; set; }    // Add Email field
+    public string? ProfileImage { get; set; } // Add ProfileImage field for URL
     // Add password change fields separately for security
 }
 

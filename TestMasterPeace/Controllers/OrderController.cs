@@ -183,6 +183,18 @@ namespace TestMasterPeace.Controllers
                         Price = cartItem.Product.Price
                     }).ToList();
                     await _context.OrderItems.AddRangeAsync(orderItems);
+                    
+                    // For cash on delivery orders, mark the products as sold immediately
+                    if (!requiresPaymentSimulation)
+                    {
+                        foreach (var cartItem in sellerCartItems)
+                        {
+                            if (cartItem.Product != null)
+                            {
+                                cartItem.Product.IsSold = true;
+                            }
+                        }
+                    }
                 }
 
                 // Only clear cart if it was NOT a simulated payment (cart needed for payment confirmation)

@@ -25,6 +25,9 @@ public class ProductController(MasterPeiceContext context) : ControllerBase
     {
         var query = context.Products.Include(p => p.Seller).AsQueryable();
 
+        // Only include products that haven't been sold
+        query = query.Where(p => !p.IsSold);
+
         if (categoryId.HasValue && categoryId > 0)
         {
             query = query.Where(p => p.CategoryId == categoryId.Value);

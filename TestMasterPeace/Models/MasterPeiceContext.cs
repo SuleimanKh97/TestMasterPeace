@@ -205,6 +205,9 @@ public partial class MasterPeiceContext : DbContext
                 .HasColumnType("decimal(10, 2)")
                 .HasColumnName("price");
             entity.Property(e => e.SellerId).HasColumnName("seller_id");
+            entity.Property(e => e.IsSold)
+                .HasColumnName("IsSold")
+                .HasDefaultValue(false);
 
             entity.HasOne(d => d.Category).WithMany(p => p.Products)
                 .HasForeignKey(d => d.CategoryId)
